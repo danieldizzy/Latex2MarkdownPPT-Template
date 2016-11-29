@@ -258,3 +258,145 @@ This statement requires citation \cite{p1}.
 %----------------------------------------------------------------------------------------
 
 \end{document} 
+
+
+TSN性能評価 作業整理
+
+16-11-25 E産業G 池田
+
+このメモは、12/9のインターン成果報告および技術資料登録(技メモ想定)に向けて
+10/3からのTSN性能評価の作業内容を整理したものである。
+プロジェクトの背景・目的等
+
+    2012年頃より、IEEE802.1委員会において、産業ネットワーク向けの低遅延・高精度時刻同期・高信頼(冗長化)などの
+    新たなイーサネット技術群が議論され、TSN(Time-Sensitive Networking)として標準化が進められてきた。
+    TSNは当社FAビジネスにおいても大きなインパクトがあると想定され、その技術を詳細に理解することが必要である。
+    しかしながら、2016年11月現在、TSNの多くの技術はドラフト段階であり、製品に適用した場合の機能や性能について
+    理解することが難しい状況であった。
+    かかる状況のもと、TTTech社よりドラフト仕様を元にTSN技術の一部を実装したTSNスタータキットが販売された。
+        販売されたのはいつだっけ？
+    そこで、E産業GではこのTSNスタータキットを用い、性能面を中心にTSNの評価を行った。結果を報告する。
+
+10/3からやったこと
+
+    TSNの概要把握
+        TSNドラフトと技術資料の調査
+        詳細はリソースの1参照。
+    TSNスタータキット調査
+        マニュアルを読みながら実機を組み立てて何ができるか調査した。
+        わかったこと
+            TSNスイッチ×3とBeagle Bone Black(以下、BBB)×2からなるキット。
+            TSNスイッチはIEEE1588v2(以下、PTPv2)とIEEE802.1Qbv、BBBはPTPv2のみサポート。
+
+            キットは起動すると自動的にPTPv2で時刻同期。さらに、TSNスイッチは時刻同期に成功すると
+            IEEE802.1Qbvの動作(フレームスケジューリング)を開始する。
+
+                3.2 Getting Started
+                The Pub/Sub demo application starts on the endpoints automatically after the power-up
+                and requires no user action.
+
+                3.3 Clock Synchronization
+                All devices of the DEStarter Kit make use of a PTP clock synchronization also referred as 1588
+                version 2. The clock synchronization is needed to establish a common time within the network. The
+                configured TSN schedule is activated automatically in the switches, once the devices are
+                successfully synchronized.
+
+            BBBはOPC-UA PubSubパケットを双方向で送信する。これらのパケットはTSNトラフィックとして扱われる。
+            また、BBBはTSNとして扱われないトラフィック(QoSトラフィック)も同時に送信する。
+
+                3.4 OPC UA PubSub Demo Application
+                The demo application starts automatically when the endpoints are powered up.
+                These data sets are published periodically using
+                TSN data flows and also using normal QoS Ethernet traffic to compare the performance.
+
+                TSNトラフィックか否かはVLANで判断する
+
+                    4.1 TSN configuration
+                    The OPC UA PubSub nodes exchange critical data based on a VLAN configuration. This data is
+                    transmitted using VLAN ID 3, Priority 5 and will be forwarded by the switch using standard rules.
+                    The VLAN ID 3 is limited to the ports within the critical path in the network.
+
+            BBBにはWebI/Fが用意されており、TSNとQoSトラフィックのレートをリアルタイムで測定可能。
+            TSNスイッチとBBBのPTPv2の設定変更は極めて限定的。
+                BBBのPTPv2実装はlinuxptp。マニュアルには記載無いが、linuxptpのコマンド群で
+                priority2の変更や動作状態確認(例えばBMの認識状態)を行えることを確かめた。
+                スイッチは設定も動作状態表示も基本的に不可
+        課題
+
+            WebI/Fの測定はS/Wで行うため精度が低い(課題1)
+
+                5.1 Graphical Data Visualization - Web Interface
+                ? TSN TS type (Tx/Rx): This value shows which kind of timestamp is used for TSN
+                Streams to perform the measurements.
+                ? SW: Software timestamp is used (kernel driver level)
+                ? HW: Hardware timestamp is used
+                ? QoS TS type (Tx/Rx): This value shows which kind of timestamp is used for QoS
+                Streams to perform the measurements.
+                ? SW: Software timestamp is used (kernel driver level)
+                ? HW: Hardware timestamp is used
+
+            BBBのデモアプリを含め、スタータキットは基本コンフィグ不可であり、条件を変えて測定ができない(課題2)。
+                例えば、パケット長やレート。
+                仮に変えられたとしても、レートはおそらくそんなに高くはならない。
+            IEEE802.1Qbvのパラメータが分からない(課題3)
+                マニュアルの4.1節にスケジュールダイアグラムがあるけれど、詳細が良く分からない
+                ゲートオープンの時間、キューのマッピング等。
+        対策
+            課題1と2の対策: IXIAを使って性能測定する。
+            課題3はTTTechに聞く。
+    TSN性能評価
+        方針
+            IXIAをPTPv2サポート機器としてネットワークに参加させ、レイテンシを測定
+        準備
+            BBBが送信しているパケットを調べる
+                IEEE4000を使ってミラーリングしてパケット解析。
+                BBBはPTPv2と、239.0.0.1宛てのマルチキャストを送信していた。
+                マルチキャストはVLAN ID=3 Prio.=5(TSN)とVLAN ID=3 Prio.=0(QoS)の二種類
+                パケットデータは未調査だが、別途PCからUA Expertで見るに、トラフィックの統計情報の模様。
+                OPC-UAプロセスも特定(Killしたらパケットがとまった)
+            IXIAの使い方を調べる
+                PTPv2エミュレーション機能はメンバも使った人がいないので、マニュアルをもとに調査し
+                操作方法を確立。
+        環境構築・測定
+            SW-1のport4、SW-3のport3にIXIA-1と2を追加。さらに、noise-traffic(低優先パケット)用に
+            IXIA-port3を追加(図を書くこと)。
+                BBBは残す(外したらパケットが通らなくなった。スケジュールがアクティベートされない？)
+                ただし、OPC-UAプロセスはkillしてパケットを止める。
+            IXIA-1と2は双方向でパケットを送信し、スループットとレイテンシを測定。
+                VLAN ID=3 Prio.=5(TSN)とVLAN ID=3 Prio.=0(QoS)の二種類でそれぞれ実施。
+                パラメータを色々変える。測定パケットのパケット長やレート、さらにnoise-trafficのレート等。
+
+        結果
+        T.B.D.
+        考察
+            Qbvの効果は出ているか
+                レートは低いが遅延は固定。noise-trafficに依らない。
+            理論値との比較
+
+                課題3が解決できていない問題があるが、そもそもどうやってQbvのスループットやレイテンシを
+                算出するのか。→ A.I.詳しい人に聞くこと
+
+                普通のQoSスイッチの算出との比較でもとりあえず良い？
+            OPC-UAとTSNの連携
+                OPC-UA Pub/Sub over TSNだが、スイッチ側ではOPC-UAかどうかは別に見ていないので
+                実際連携はしていない。
+
+インターン成果報告会に向けて
+
+    インターンで苦労したこと、身についたこと
+        技術面の他、生活や取り組み姿勢等も含む。
+    ダニエルさんは今回の研究成果を自分の領域にどう活かすか
+        ネットワークの評価技術は身についたはず。何か役立つ？
+        PTPv2とかOPC-UAの適用はありうる？
+        (大石さんの話では)TSNにはセキュリティの話題はまだ無い模様。
+        一方、OPC-UA PubSubはドラフトにセキュリティの話題もある模様なので
+        セキュリティに関する話をするならそちら？
+
+リソース
+
+    TSN/OPC-UA概要とTSNスタータキット調査のドキュメント(ダニエルさんのレポート)
+    file:\\elfserve\nse$\Teams\E産業\社外秘\160_インターンシップ\FY16-3Q\00_file_sharing\40_Achievement\
+
+    スタータキットのマニュアル
+    file:\\elfserve\nse$\Teams\E制御\社外秘\common\1_起業費\2016\30_入着機材\TSN_スタータキット
+
